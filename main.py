@@ -194,7 +194,7 @@ def cosine_similarity_numpy(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Pure NumPy cosine similarity"""
     return np.dot(a, b.T) / (np.linalg.norm(a, axis=1)[:, np.newaxis] * np.linalg.norm(b, axis=1))
 
-@app.post("/recommend")
+
 async def recommend_posts(request: RecommendRequest):
     post_id = request.id
     
