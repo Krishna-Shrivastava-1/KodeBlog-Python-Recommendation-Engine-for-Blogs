@@ -8,8 +8,22 @@ import numpy as np
 from typing import List
 import re
 import os
+from fastapi.middleware.cors import CORSMiddleware 
 app = FastAPI()
 from dotenv import load_dotenv
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        os.getenv("BASE_URL"),                    # Your local dev
+        os.getenv("PROD_BASE_URL"),          # Your production                     
+    ],
+    allow_credentials=True,
+    allow_methods=["GET"],                              # POST, GET for /recommend
+    allow_headers=["*"],
+)
+
+
 load_dotenv(verbose=True)
 # YOUR API ENDPOINTS (replace with your real URLs)
 CURRENT_POST_API =os.getenv("CURRENT_POST_API")  # Your getPostBySlug
@@ -25,7 +39,7 @@ def clean_text(text: str) -> str:
     text = re.sub(r'[^\w\s]', ' ', text).lower()
     return text[:500]  # First 500 chars
 
-@app.post("/recommend")
+
 async def recommend_posts(request: RecommendRequest):
     id = request.id  # "unique-number-of-occurrences"
     # STEP 1: Get CURRENT post user is reading
@@ -92,7 +106,7 @@ async def recommend_posts(request: RecommendRequest):
     }
 
 # Test endpoint
-@app.get("/test/{id}")
+@app.get("/recommend/{id}")
 async def test_recommend(id: str):
     return await recommend_posts(RecommendRequest(id=id))
 
