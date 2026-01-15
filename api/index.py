@@ -99,7 +99,7 @@ async def get_recommendations(post_id: str):
             "title": current_post['title'],
             "slug": current_post['slug']
         },
-        "recommendations": recommendations[:5],
+        "recommendations": recommendations[:4],
         "count": len(recommendations)
     }
 
