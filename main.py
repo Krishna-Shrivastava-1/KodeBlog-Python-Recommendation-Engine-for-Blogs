@@ -223,10 +223,13 @@ async def recommend_posts(request: RecommendRequest):
         features = f"{post['title']} {post.get('tag', '')} {clean_text(post['content'])}"
         features_list.append(features)
         posts_data.append({
-            'id': post['id'],
-            'slug': post['slug'],
-            'title': post['title']
-        })
+                'id': post['id'],
+                'slug': post['slug'],
+                'title': post['title'],
+                'subtitle': post.get('subtitle', ''),
+                'thumbnailimage': post.get('thumbnailimage', ''),
+                'similarity': round(similarity, 3)
+            })
     
     # STEP 4: Pure NumPy TF-IDF
     tfidf_matrix, _ = simple_tfidf_vectorizer(features_list)
