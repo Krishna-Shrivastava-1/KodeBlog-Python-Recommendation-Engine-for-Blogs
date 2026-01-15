@@ -10,9 +10,14 @@
 # threadpoolctl==3.2.0
 
 
-fastapi==0.115.0
-uvicorn[standard]==0.30.6
-python-dotenv==1.0.1
-pandas==2.2.2
-requests==2.32.3
-numpy==1.24.3
+# Pin Python version FIRST
+python==3.10.14
+
+# OLDER versions = Pre-compiled wheels exist
+pandas==1.5.3
+numpy==1.23.5
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-dotenv==1.0.0
+requests==2.31.0
+
