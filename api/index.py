@@ -141,7 +141,7 @@ async def get_recommendations(blog_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Old Recommendation System (Cosine)
+# Old Recommendation System [Cosine]
 # async def get_recommendations(post_id: str):
 #     """Main recommendation endpoint - GET /recommend/{post_id}"""
     
