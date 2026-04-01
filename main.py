@@ -128,6 +128,10 @@ import re
 import os
 from collections import Counter
 from typing import List, Dict
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams,PayloadSchemaType
+from qdrant_client.http.models import Filter, FieldCondition, MatchValue
+
 
 app = FastAPI()
 
@@ -194,76 +198,163 @@ def cosine_similarity_numpy(a: np.ndarray, b: np.ndarray) -> np.ndarray:
     """Pure NumPy cosine similarity"""
     return np.dot(a, b.T) / (np.linalg.norm(a, axis=1)[:, np.newaxis] * np.linalg.norm(b, axis=1))
 
-
-async def recommend_posts(request: RecommendRequest):
-    post_id = request.id
+# Old Recommendation system function
+# async def recommend_posts(request: RecommendRequest):
+#     post_id = request.id
     
-    # STEP 1: Get ALL posts
+#     # STEP 1: Get ALL posts
+#     try:
+#         all_posts_resp = requests.get(ALL_POSTS_API)
+#         all_posts = all_posts_resp.json()['posts']
+#     except:
+#         raise HTTPException(status_code=500, detail="Failed to fetch posts")
+    
+#     # STEP 2: Find current post
+#     current_post = None
+#     for post in all_posts:
+#         if post['id'] == post_id:
+#             current_post = post
+#             break
+    
+#     if not current_post:
+#         raise HTTPException(status_code=404, detail="Post not found")
+    
+#     # STEP 3: Create features
+#     posts_data = []
+#     features_list = []
+    
+#     for post in all_posts:
+#         features = f"{post['title']} {post.get('tag', '')} {clean_text(post['content'])}"
+#         features_list.append(features)
+#         posts_data.append({
+#                 'id': post['id'],
+#                 'slug': post['slug'],
+#                 'title': post['title'],
+#                 'subtitle': post.get('subtitle', ''),
+#                 'thumbnailimage': post.get('thumbnailimage', ''),
+#                 'similarity': round(similarity, 3)
+#             })
+    
+#     # STEP 4: Pure NumPy TF-IDF
+#     tfidf_matrix, _ = simple_tfidf_vectorizer(features_list)
+    
+#     # STEP 5: Find current post index
+#     current_idx = next(i for i, post in enumerate(posts_data) if post['id'] == post_id)
+    
+#     # STEP 6: Cosine similarity
+#     cosine_scores = cosine_similarity_numpy(tfidf_matrix[[current_idx]], tfidf_matrix)[0]
+    
+#     # STEP 7: Top 5 recommendations (exclude self)
+#     sim_scores = list(enumerate(cosine_scores))
+#     sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:6]
+    
+#     recommendations = []
+#     for idx, score in sim_scores:
+#         if score > 0.05:  # Lower threshold for NumPy version
+#             rec_post = posts_data[idx]
+#             recommendations.append({
+#                 'id': rec_post['id'],
+#                 'slug': rec_post['slug'],
+#                 'title': rec_post['title'],
+#                 'similarity': float(score)
+#             })
+    
+#     return {
+#         "current_post": current_post['title'],
+#         "recommendations": recommendations,
+#         "count": len(recommendations)
+#     }
+QDRANT_URL = os.getenv("QDRANT_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+client = QdrantClient(
+    url=QDRANT_URL,
+    api_key=QDRANT_API_KEY
+)
+COLLECTION_NAME = "blog_embeddings"
+async def recommend_posts(blog_id: str):
     try:
-        all_posts_resp = requests.get(ALL_POSTS_API)
-        all_posts = all_posts_resp.json()['posts']
-    except:
-        raise HTTPException(status_code=500, detail="Failed to fetch posts")
-    
-    # STEP 2: Find current post
-    current_post = None
-    for post in all_posts:
-        if post['id'] == post_id:
-            current_post = post
-            break
-    
-    if not current_post:
-        raise HTTPException(status_code=404, detail="Post not found")
-    
-    # STEP 3: Create features
-    posts_data = []
-    features_list = []
-    
-    for post in all_posts:
-        features = f"{post['title']} {post.get('tag', '')} {clean_text(post['content'])}"
-        features_list.append(features)
-        posts_data.append({
-                'id': post['id'],
-                'slug': post['slug'],
-                'title': post['title'],
-                'subtitle': post.get('subtitle', ''),
-                'thumbnailimage': post.get('thumbnailimage', ''),
-                'similarity': round(similarity, 3)
-            })
-    
-    # STEP 4: Pure NumPy TF-IDF
-    tfidf_matrix, _ = simple_tfidf_vectorizer(features_list)
-    
-    # STEP 5: Find current post index
-    current_idx = next(i for i, post in enumerate(posts_data) if post['id'] == post_id)
-    
-    # STEP 6: Cosine similarity
-    cosine_scores = cosine_similarity_numpy(tfidf_matrix[[current_idx]], tfidf_matrix)[0]
-    
-    # STEP 7: Top 5 recommendations (exclude self)
-    sim_scores = list(enumerate(cosine_scores))
-    sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:6]
-    
-    recommendations = []
-    for idx, score in sim_scores:
-        if score > 0.05:  # Lower threshold for NumPy version
-            rec_post = posts_data[idx]
-            recommendations.append({
-                'id': rec_post['id'],
-                'slug': rec_post['slug'],
-                'title': rec_post['title'],
-                'similarity': float(score)
-            })
-    
-    return {
-        "current_post": current_post['title'],
-        "recommendations": recommendations,
-        "count": len(recommendations)
-    }
+        # 1. Get the vector for the current post
+        points, _ = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="blog_id", match=MatchValue(value=blog_id))]
+            ),
+            limit=1,
+            with_vectors=True
+        )
+
+        if not points:
+            raise HTTPException(status_code=404, detail="Blog vector not found")
+
+        # 2. Search with a high limit (50+)
+        search_results = client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=points[0].vector,
+            query_filter=Filter(
+                must_not=[FieldCondition(key="blog_id", match=MatchValue(value=blog_id))]
+            ),
+            limit=80, # Increased even more to ensure variety
+            with_payload=True
+        ).points
+
+        recommendations = []
+        seen_ids = set()
+        seen_titles = set() # NEW: Track titles to prevent duplicates
+
+        for hit in search_results:
+            b_id = hit.payload.get("blog_id")
+            title = hit.payload.get("title")
+            
+            # NEW: Deduplicate by BOTH ID and Title
+            if b_id and title and b_id not in seen_ids and title not in seen_titles:
+                recommendations.append({
+                    "blog_id": b_id,
+                    "title": title,
+                    "tags": hit.payload.get("tags"),
+                    "slug": hit.payload.get("slug") or b_id,
+                    "score": round(hit.score, 3)
+                })
+                seen_ids.add(b_id)
+                seen_titles.add(title) # Mark this title as "used"
+            
+            if len(recommendations) >= 4:
+                break
+
+        # 3. Fallback (Same Title-Deduplication applied here too)
+        if len(recommendations) < 4:
+            extra_points, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                limit=30,
+                with_payload=True
+            )
+            for point in extra_points:
+                b_id = point.payload.get("blog_id")
+                title = point.payload.get("title")
+                
+                if b_id != blog_id and b_id not in seen_ids and title not in seen_titles:
+                    recommendations.append({
+                        "blog_id": b_id,
+                        "title": title,
+                        "tags": point.payload.get("tags"),
+                        "slug": point.payload.get("slug") or b_id,
+                        "score": 0.0
+                    })
+                    seen_ids.add(b_id)
+                    seen_titles.add(title)
+                if len(recommendations) >= 4: break
+
+        return {
+            "status": "success",
+            "recommendations": recommendations[:4]
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/recommend/{post_id}")
 async def test_recommend(post_id: str):
-    return await recommend_posts(RecommendRequest(id=post_id))
+    # return await recommend_posts(RecommendRequest(id=post_id))
+    return await recommend_posts(post_id)
 
 if __name__ == "__main__":
     import uvicorn
