@@ -99,7 +99,7 @@ async def get_recommendations(post_id: str): # Renamed parameter for clarity
             ) if current_slug else Filter(
                 must_not=[FieldCondition(key="blog_id", match=MatchValue(value=current_blog_id))]
             ),
-            limit=60, 
+            limit=80, 
             with_payload=True
         ).points
 
