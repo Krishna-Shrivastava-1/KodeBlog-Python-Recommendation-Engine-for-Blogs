@@ -61,64 +61,54 @@ client = QdrantClient(
 )
 COLLECTION_NAME = os.getenv("COLLECTION_NAME_EMBEDDING")
 @app.get("/recommend/{post_id}")
-async def get_recommendations(post_id: str): # Renamed parameter for clarity
+async def get_recommendations(post_id: str):
     try:
-        # 1. Get the vector for the current post
-        # We check both blog_id and slug to find the correct point
+        # 1. Get the vector using the post_id (which is your slug/id)
         points, _ = client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=Filter(
-                should=[
-                    FieldCondition(key="blog_id", match=MatchValue(value=post_id)),
-                    FieldCondition(key="slug", match=MatchValue(value=post_id))
-                ]
+                must=[FieldCondition(key="blog_id", match=MatchValue(value=post_id))]
             ),
             limit=1,
             with_vectors=True
         )
 
         if not points:
+            # If not found by slug, it might be a UUID, but we use the same key
             raise HTTPException(status_code=404, detail="Blog vector not found")
 
-        current_point = points[0]
-        # Important: Get the real UUID and the Slug of the current post to exclude it
-        current_blog_id = current_point.payload.get("blog_id")
-        current_slug = current_point.payload.get("slug")
+        current_node = points[0]
+        # This is the string/UUID currently opened by the user
+        actual_id = current_node.payload.get("blog_id") 
 
-        # 2. Search excluding the current post
+        # 2. Search excluding the current ID
         search_results = client.query_points(
             collection_name=COLLECTION_NAME,
-            query=current_point.vector,
+            query=current_node.vector,
             query_filter=Filter(
                 must_not=[
-                    # Exclude the current blog by ID
-                    FieldCondition(key="blog_id", match=MatchValue(value=current_blog_id)),
-                    # Exclude the current blog by Slug (if it exists)
-                    FieldCondition(key="slug", match=MatchValue(value=current_slug))
+                    FieldCondition(key="blog_id", match=MatchValue(value=actual_id))
                 ]
-            ) if current_slug else Filter(
-                must_not=[FieldCondition(key="blog_id", match=MatchValue(value=current_blog_id))]
             ),
-            limit=80, 
+            limit=100, 
             with_payload=True
         ).points
 
         recommendations = []
-        seen_ids = {current_blog_id} # Pre-populate with current post
-        seen_titles = {current_point.payload.get("title")} # Pre-populate with current title
+        seen_ids = {actual_id, post_id} 
+        seen_titles = {current_node.payload.get("title")}
 
         for hit in search_results:
             b_id = hit.payload.get("blog_id")
             title = hit.payload.get("title")
-            slug = hit.payload.get("slug")
             
-            # Deduplicate and ensure no self-match
+            # Use blog_id as the slug since you confirmed it holds the slug
             if b_id and title and b_id not in seen_ids and title not in seen_titles:
                 recommendations.append({
                     "blog_id": b_id,
                     "title": title,
                     "tags": hit.payload.get("tags"),
-                    "slug": slug or b_id,
+                    "slug": b_id, # Directly use b_id as slug
                     "score": round(hit.score, 3)
                 })
                 seen_ids.add(b_id)
@@ -127,11 +117,11 @@ async def get_recommendations(post_id: str): # Renamed parameter for clarity
             if len(recommendations) >= 4:
                 break
 
-        # 3. Fallback logic remains same but respects the exclusion sets
+        # 3. Fallback (if search is empty)
         if len(recommendations) < 4:
             extra_points, _ = client.scroll(
                 collection_name=COLLECTION_NAME,
-                limit=30,
+                limit=40,
                 with_payload=True
             )
             for point in extra_points:
@@ -143,7 +133,7 @@ async def get_recommendations(post_id: str): # Renamed parameter for clarity
                         "blog_id": b_id,
                         "title": title,
                         "tags": point.payload.get("tags"),
-                        "slug": point.payload.get("slug") or b_id,
+                        "slug": b_id,
                         "score": 0.0
                     })
                     seen_ids.add(b_id)
@@ -156,6 +146,7 @@ async def get_recommendations(post_id: str): # Renamed parameter for clarity
         }
 
     except Exception as e:
+        print(f"Error logic: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Old Recommendation System (Cosine)
