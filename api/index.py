@@ -196,14 +196,17 @@ async def get_recommendations(blog_id: str):
 #         "count": len(recommendations)
 #     }
 
+
+
 @app.get("/test/{post_id}")
 async def test_recommendation(post_id: str):
     """Test endpoint"""
     return await get_recommendations(post_id)
 
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy", "service": "kodblog-recommendation"}
+    return {"status": "healthy", "service": "kodeblog-recommendation"}
 
 
