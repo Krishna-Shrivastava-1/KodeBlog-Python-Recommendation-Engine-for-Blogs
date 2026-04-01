@@ -61,13 +61,17 @@ client = QdrantClient(
 )
 COLLECTION_NAME = os.getenv("COLLECTION_NAME_EMBEDDING")
 @app.get("/recommend/{post_id}")
-async def get_recommendations(blog_id: str):
+async def get_recommendations(post_id: str): # Renamed parameter for clarity
     try:
         # 1. Get the vector for the current post
+        # We check both blog_id and slug to find the correct point
         points, _ = client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=Filter(
-                must=[FieldCondition(key="blog_id", match=MatchValue(value=blog_id))]
+                should=[
+                    FieldCondition(key="blog_id", match=MatchValue(value=post_id)),
+                    FieldCondition(key="slug", match=MatchValue(value=post_id))
+                ]
             ),
             limit=1,
             with_vectors=True
@@ -76,41 +80,54 @@ async def get_recommendations(blog_id: str):
         if not points:
             raise HTTPException(status_code=404, detail="Blog vector not found")
 
-        # 2. Search with a high limit (50+)
+        current_point = points[0]
+        # Important: Get the real UUID and the Slug of the current post to exclude it
+        current_blog_id = current_point.payload.get("blog_id")
+        current_slug = current_point.payload.get("slug")
+
+        # 2. Search excluding the current post
         search_results = client.query_points(
             collection_name=COLLECTION_NAME,
-            query=points[0].vector,
+            query=current_point.vector,
             query_filter=Filter(
-                must_not=[FieldCondition(key="blog_id", match=MatchValue(value=blog_id))]
+                must_not=[
+                    # Exclude the current blog by ID
+                    FieldCondition(key="blog_id", match=MatchValue(value=current_blog_id)),
+                    # Exclude the current blog by Slug (if it exists)
+                    FieldCondition(key="slug", match=MatchValue(value=current_slug))
+                ]
+            ) if current_slug else Filter(
+                must_not=[FieldCondition(key="blog_id", match=MatchValue(value=current_blog_id))]
             ),
-            limit=60, # Increased even more to ensure variety
+            limit=60, 
             with_payload=True
         ).points
 
         recommendations = []
-        seen_ids = set()
-        seen_titles = set() # NEW: Track titles to prevent duplicates
+        seen_ids = {current_blog_id} # Pre-populate with current post
+        seen_titles = {current_point.payload.get("title")} # Pre-populate with current title
 
         for hit in search_results:
             b_id = hit.payload.get("blog_id")
             title = hit.payload.get("title")
+            slug = hit.payload.get("slug")
             
-            # NEW: Deduplicate by BOTH ID and Title
+            # Deduplicate and ensure no self-match
             if b_id and title and b_id not in seen_ids and title not in seen_titles:
                 recommendations.append({
                     "blog_id": b_id,
                     "title": title,
                     "tags": hit.payload.get("tags"),
-                    "slug": hit.payload.get("slug") or b_id,
+                    "slug": slug or b_id,
                     "score": round(hit.score, 3)
                 })
                 seen_ids.add(b_id)
-                seen_titles.add(title) # Mark this title as "used"
+                seen_titles.add(title)
             
             if len(recommendations) >= 4:
                 break
 
-        # 3. Fallback (Same Title-Deduplication applied here too)
+        # 3. Fallback logic remains same but respects the exclusion sets
         if len(recommendations) < 4:
             extra_points, _ = client.scroll(
                 collection_name=COLLECTION_NAME,
@@ -121,7 +138,7 @@ async def get_recommendations(blog_id: str):
                 b_id = point.payload.get("blog_id")
                 title = point.payload.get("title")
                 
-                if b_id != blog_id and b_id not in seen_ids and title not in seen_titles:
+                if b_id not in seen_ids and title not in seen_titles:
                     recommendations.append({
                         "blog_id": b_id,
                         "title": title,
