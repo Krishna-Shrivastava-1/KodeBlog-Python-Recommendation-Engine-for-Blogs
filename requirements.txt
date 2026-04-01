@@ -22,4 +22,6 @@
 fastapi==0.104.1
 mangum==0.17.0
 requests==2.31.0
+qdrant-client
+python-dotenv
 
