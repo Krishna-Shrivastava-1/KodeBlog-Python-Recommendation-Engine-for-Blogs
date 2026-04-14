@@ -135,7 +135,7 @@ from qdrant_client.http.models import Filter, FieldCondition, MatchValue
 
 app = FastAPI()
 
-# 🔒 CORS - Only your domains
+# 🔒 CORS - Only your domain
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
